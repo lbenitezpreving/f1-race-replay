@@ -17,19 +17,13 @@ def main(year=None, round_number=None, playback_speed=1):
 
   drivers = session.drivers
 
-  driver_codes = {
-    num: session.get_driver(num)["Abbreviation"]
-    for num in drivers
-  } 
-
-  driver_colors = get_driver_colors(session)
-
   run_arcade_replay(
-    frames=race_telemetry,
+    frames=race_telemetry['frames'],
+    track_statuses=race_telemetry['track_statuses'],
     example_lap=example_lap,
     drivers=drivers,
     playback_speed=1.0,
-    driver_colors=driver_colors,
+    driver_colors=race_telemetry['driver_colors'],
     title=f"{session.event['EventName']} - Race"
   )
 

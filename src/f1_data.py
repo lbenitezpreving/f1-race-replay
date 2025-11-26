@@ -3,6 +3,9 @@ import fastf1
 import fastf1.plotting
 import numpy as np
 import json
+from datetime import timedelta
+
+from src.lib.tyres import get_tyre_compound_int
 
 # Enable local cache (adjust path if you prefer)
 fastf1.Cache.enable_cache('.fastf1-cache')
@@ -56,6 +59,7 @@ def get_race_telemetry(session):
 
     global_t_min = None
     global_t_max = None
+    
 
     # 1. Get all of the drivers telemetry data
     for driver_no in drivers:
@@ -73,6 +77,7 @@ def get_race_telemetry(session):
         race_dist_all = []
         rel_dist_all = []
         lap_numbers = []
+        tyre_compounds = []
 
         total_dist_so_far = 0.0
 
@@ -81,6 +86,8 @@ def get_race_telemetry(session):
             # get telemetry for THIS lap only
             lap_tel = lap.get_telemetry()
             lap_number = lap.LapNumber
+            tyre_compund_as_int = get_tyre_compound_int(lap.Compound)
+
             if lap_tel.empty:
                 continue
 
@@ -105,6 +112,7 @@ def get_race_telemetry(session):
             race_dist_all.append(race_d_lap)
             rel_dist_all.append(rd_lap)
             lap_numbers.append(np.full_like(t_lap, lap_number))
+            tyre_compounds.append(np.full_like(t_lap, tyre_compund_as_int))
 
         if not t_all:
             continue
@@ -115,6 +123,7 @@ def get_race_telemetry(session):
         race_dist_all = np.concatenate(race_dist_all)
         rel_dist_all = np.concatenate(rel_dist_all)
         lap_numbers = np.concatenate(lap_numbers)
+        tyre_compounds = np.concatenate(tyre_compounds)
 
         order = np.argsort(t_all)
         t_all = t_all[order]
@@ -123,6 +132,7 @@ def get_race_telemetry(session):
         race_dist_all = race_dist_all[order]
         rel_dist_all = rel_dist_all[order]            
         lap_numbers = lap_numbers[order]
+        tyre_compounds = tyre_compounds[order]
 
         driver_data[code] = {
             "t": t_all,
@@ -131,6 +141,7 @@ def get_race_telemetry(session):
             "dist": race_dist_all,
             "rel_dist": rel_dist_all,                   
             "lap": lap_numbers,
+            "tyre": tyre_compounds,
         }
 
         t_min = t_all.min()
@@ -138,10 +149,10 @@ def get_race_telemetry(session):
         global_t_min = t_min if global_t_min is None else min(global_t_min, t_min)
         global_t_max = t_max if global_t_max is None else max(global_t_max, t_max)
 
-    # 3. Create a timeline (start from zero)
+    # 2. Create a timeline (start from zero)
     timeline = np.arange(global_t_min, global_t_max, DT) - global_t_min
 
-    # 4. Resample each driver's telemetry (x, y, gap) onto the common timeline
+    # 3. Resample each driver's telemetry (x, y, gap) onto the common timeline
     resampled_data = {}
 
     for code, data in driver_data.items():
@@ -150,6 +161,7 @@ def get_race_telemetry(session):
         y = data["y"]
         dist = data["dist"]     
         rel_dist = data["rel_dist"]
+        tyre = data["tyre"]
 
         # ensure sorted by time
         order = np.argsort(t)
@@ -159,13 +171,15 @@ def get_race_telemetry(session):
         dist_sorted = dist[order]
         rel_dist_sorted = rel_dist[order]      
         lap_sorted = data["lap"][order]
-
+        tyre_sorted = tyre[order]
+ 
         x_resampled = np.interp(timeline, t_sorted, x_sorted)
         y_resampled = np.interp(timeline, t_sorted, y_sorted)
         dist_resampled = np.interp(timeline, t_sorted, dist_sorted)
         rel_dist_resampled = np.interp(timeline, t_sorted, rel_dist_sorted)
         lap_resampled = np.interp(timeline, t_sorted, lap_sorted)
-
+        tyre_resampled = np.interp(timeline, t_sorted, tyre_sorted)
+ 
         resampled_data[code] = {
             "t": timeline,
             "x": x_resampled,
@@ -173,7 +187,31 @@ def get_race_telemetry(session):
             "dist": dist_resampled,   # race distance (metres since Lap 1 start)
             "rel_dist": rel_dist_resampled,
             "lap": lap_resampled,
+            "tyre": tyre_resampled,
         }
+
+    # 4. Incorporate track status data into the timeline (for safety car, VSC, etc.)
+
+    track_status = session.track_status
+
+    formatted_track_statuses = []
+
+    for status in track_status.to_dict('records'):
+        seconds = timedelta.total_seconds(status['Time'])
+
+        start_time = seconds - global_t_min # Shift to match timeline
+        end_time = None
+
+        # Set the end time of the previous status
+
+        if formatted_track_statuses:
+            formatted_track_statuses[-1]['end_time'] = start_time
+
+        formatted_track_statuses.append({
+            'status': status['Status'],
+            'start_time': start_time,
+            'end_time': end_time, 
+        })
 
     # 5. Build the frames + LIVE LEADERBOARD
     frames = []
@@ -188,6 +226,7 @@ def get_race_telemetry(session):
             "y": float(d["y"][i]),
             "lap": int(round(d["lap"][i])),
             "rel_dist": float(d["rel_dist"][i]),
+            "tyre": d["tyre"][i],
           })
 
         # If for some reason we have no drivers at this instant
@@ -214,6 +253,7 @@ def get_race_telemetry(session):
                 "dist": car["dist"],    
                 "lap": car["lap"],
                 "rel_dist": round(car["rel_dist"], 6),
+                "tyre": car["tyre"],
                 "position": position,
             }
 
@@ -230,8 +270,16 @@ def get_race_telemetry(session):
 
     # Save to file
     with open(f"computed_data/{event_name}_race_telemetry.json", "w") as f:
-        json.dump(frames, f, indent=2)
+        json.dump({
+            "frames": frames,
+            "driver_colors": get_driver_colors(session),
+            "track_statuses": formatted_track_statuses,
+        }, f, indent=2)
 
     print("Saved Successfully!")
     print("The replay should begin in a new window shortly")
-    return frames
+    return {
+        "frames": frames,
+        "driver_colors": get_driver_colors(session),
+        "track_statuses": formatted_track_statuses,
+    }
