@@ -347,14 +347,40 @@ class F1RaceReplayWindow(arcade.Window):
         draw_finish_line(self)
         # 3. Draw Cars
         frame = self.frames[idx]
-        for code, pos in frame["drivers"].items():
+        
+        # Calculate map center for dynamic label positioning
+        world_cx = (self.x_min + self.x_max) / 2
+        world_cy = (self.y_min + self.y_max) / 2
+        map_cx, map_cy = self.world_to_screen(world_cx, world_cy)
+
+        # Get selected drivers list safely
+        selected_drivers = getattr(self, "selected_drivers", [])
+        if not selected_drivers and getattr(self, "selected_driver", None):
+            selected_drivers = [self.selected_driver]
+
+        for i, (code, pos) in enumerate(frame["drivers"].items()):
             sx, sy = self.world_to_screen(pos["x"], pos["y"])
             color = self.driver_colors.get(code, arcade.color.WHITE)
             
-            if self.show_driver_labels:
-                lx, ly = sx + 15, sy + 15
+            is_selected = code in selected_drivers
+            
+            if self.show_driver_labels or is_selected:
+                # Calculate direction from map center to driver
+                dx = sx - map_cx
+                dy = sy - map_cy
+                dist = (dx*dx + dy*dy)**0.5
+                
+                offset_dist = 45 if i % 2 == 0 else 75
+                
+                off_x = (dx / dist) * offset_dist if dist > 0 else offset_dist
+                off_y = (dy / dist) * offset_dist if dist > 0 else 0
+                
+                lx, ly = sx + off_x, sy + off_y
                 arcade.draw_line(sx, sy, lx, ly, color, 1)
-                arcade.draw_text(code, lx + 3, ly, color, 10, anchor_x="left", anchor_y="center", bold=True)
+                
+                anchor_x = "left" if off_x >= 0 else "right"
+                text_padding = 3 if off_x >= 0 else -3
+                arcade.draw_text(code, lx + text_padding, ly, color, 10, anchor_x=anchor_x, anchor_y="center", bold=True)
 
             arcade.draw_circle_filled(sx, sy, 6, color)
         
