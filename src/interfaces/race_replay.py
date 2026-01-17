@@ -11,7 +11,8 @@ from src.ui_components import (
     RaceControlsComponent,
     ControlsPopupComponent,
     extract_race_events,
-    build_track_from_example_lap
+    build_track_from_example_lap,
+    draw_finish_line
 )
 from src.tyre_degradation_integration import TyreDegradationIntegrator
 
@@ -98,6 +99,10 @@ class F1RaceReplayWindow(arcade.Window):
             center_y=100,
             visible = visible_hud
         )
+
+        self.is_rewinding = False
+        self.is_forwarding = False
+        self.was_paused_before_hold = False
         
         # Extract race events for the progress bar
         race_events = extract_race_events(frames, track_statuses, total_laps or 0)
@@ -360,6 +365,7 @@ class F1RaceReplayWindow(arcade.Window):
                 if len(drs_outer_points) > 1:
                     arcade.draw_line_strip(drs_outer_points, drs_color, 6)
 
+        draw_finish_line(self)
         # 3. Draw Cars
         frame = self.frames[idx]
         for code, pos in frame["drivers"].items():
@@ -471,11 +477,21 @@ class F1RaceReplayWindow(arcade.Window):
         self.progress_bar_comp.draw_overlays(self)
                     
     def on_update(self, delta_time: float):
-        # Update race controls component (for flash animations)
         self.race_controls_comp.on_update(delta_time)
+        
+        seek_speed = 3.0 * max(1.0, self.playback_speed) # Multiplier for seeking speed, scales with current playback speed
+        if self.is_rewinding:
+            self.frame_index = max(0.0, self.frame_index - delta_time * FPS * seek_speed)
+            self.race_controls_comp.flash_button('rewind')
+        elif self.is_forwarding:
+            self.frame_index = min(self.n_frames - 1, self.frame_index + delta_time * FPS * seek_speed)
+            self.race_controls_comp.flash_button('forward')
+
         if self.paused:
             return
+
         self.frame_index += delta_time * FPS * self.playback_speed
+        
         if self.frame_index >= self.n_frames:
             self.frame_index = float(self.n_frames - 1)
 
@@ -488,11 +504,13 @@ class F1RaceReplayWindow(arcade.Window):
             self.paused = not self.paused
             self.race_controls_comp.flash_button('play_pause')
         elif symbol == arcade.key.RIGHT:
-            self.frame_index = min(self.frame_index + 10.0, self.n_frames - 1)
-            self.race_controls_comp.flash_button('forward')
+            self.was_paused_before_hold = self.paused
+            self.is_forwarding = True
+            self.paused = True
         elif symbol == arcade.key.LEFT:
-            self.frame_index = max(self.frame_index - 10.0, 0.0)
-            self.race_controls_comp.flash_button('rewind')
+            self.was_paused_before_hold = self.paused
+            self.is_rewinding = True
+            self.paused = True
         elif symbol == arcade.key.UP:
             if self.playback_speed < PLAYBACK_SPEEDS[-1]:
                 # Increase to next higher speed
@@ -542,6 +560,20 @@ class F1RaceReplayWindow(arcade.Window):
                 self.controls_popup_comp.show_over(left_pos, top_pos)
         elif symbol == arcade.key.B:
             self.progress_bar_comp.toggle_visibility() # toggle progress bar visibility
+
+    def on_key_release(self, symbol: int, modifiers: int):
+        if symbol == arcade.key.RIGHT:
+            self.is_forwarding = False
+            self.paused = self.was_paused_before_hold
+        elif symbol == arcade.key.LEFT:
+            self.is_rewinding = False
+            self.paused = self.was_paused_before_hold
+
+    def on_mouse_release(self, x: float, y: float, button: int, modifiers: int):
+        if self.is_forwarding or self.is_rewinding:
+            self.is_forwarding = False
+            self.is_rewinding = False
+            self.paused = self.was_paused_before_hold
 
     def on_mouse_press(self, x: float, y: float, button: int, modifiers: int):
         # forward to components; stop at first that handled it

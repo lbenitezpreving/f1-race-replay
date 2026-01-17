@@ -1571,37 +1571,47 @@ class RaceControlsComponent(BaseComponent):
             self.hover_button = 'speed_decrease'
         else:
             self.hover_button = None
+        return False
     
     def on_mouse_press(self, window, x: float, y: float, button: int, modifiers: int):
         """Handle button clicks."""
         if self._point_in_rect(x, y, self.rewind_rect):
-            # Rewind 10 frames
-            if hasattr(window, 'frame_index'):
+            # Update: Support hold-to-rewind
+            if hasattr(window, 'is_rewinding'):
+                window.was_paused_before_hold = window.paused
+                window.is_rewinding = True
+                window.paused = True
+            elif hasattr(window, 'frame_index'):
                 window.frame_index = int(max(0, window.frame_index - 10))
             return True
         elif self._point_in_rect(x, y, self.play_pause_rect):
-            # Toggle pause
             if hasattr(window, 'paused'):
                 window.paused = not window.paused
             return True
         elif self._point_in_rect(x, y, self.forward_rect):
-            # Forward 10 frames
-            if hasattr(window, 'frame_index') and hasattr(window, 'n_frames'):
+            # Update: Support hold-to-forward
+            if hasattr(window, 'is_forwarding'):
+                window.was_paused_before_hold = window.paused
+                window.is_forwarding = True
+                window.paused = True
+            elif hasattr(window, 'frame_index') and hasattr(window, 'n_frames'):
                 window.frame_index = int(min(window.n_frames - 1, window.frame_index + 10))
             return True
-        elif self._point_in_rect(x, y,self.speed_increase_rect):
-            # Increase speed
+        elif self._point_in_rect(x, y, self.speed_increase_rect):
             if hasattr(window, 'playback_speed'):
+                # FIX: Use index lookup to increment speed.
                 if window.playback_speed < max(self.PLAYBACK_SPEEDS):
                     current_index = self.PLAYBACK_SPEEDS.index(window.playback_speed)
                     window.playback_speed = self.PLAYBACK_SPEEDS[min(current_index + 1, len(self.PLAYBACK_SPEEDS) - 1)]
+                    self.flash_button('speed_increase')
             return True
-        elif self._point_in_rect(x, y,self.speed_decrease_rect):
-            # Decrease speed
+        elif self._point_in_rect(x, y, self.speed_decrease_rect):
             if hasattr(window, 'playback_speed'):
+                # FIX: Use index lookup to decrement speed safely within defined PLAYBACK_SPEEDS.
                 if window.playback_speed > min(self.PLAYBACK_SPEEDS):
                     current_index = self.PLAYBACK_SPEEDS.index(window.playback_speed)
                     window.playback_speed = self.PLAYBACK_SPEEDS[max(0, current_index - 1)]
+                    self.flash_button('speed_decrease')
             return True
         return False
     
@@ -1745,7 +1755,7 @@ def plotDRSzones(example_lap):
    y_val = example_lap["Y"]
    drs_zones = []
    drs_start = None
-   
+
    for i, val in enumerate(example_lap["DRS"]):
        if val in [10, 12, 14]:
            if drs_start is None:
@@ -1770,3 +1780,54 @@ def plotDRSzones(example_lap):
        drs_zones.append(zone)
    
    return drs_zones
+
+def draw_finish_line(self, session_type = 'R'):
+    if(session_type not in ['R', 'Q']):
+        print("Invalid session type for finish line drawing...")
+        return
+
+    start_inner = None
+    start_outer = None
+
+    if(session_type == 'Q' and len(self.inner_pts) > 0 and len(self.outer_pts) > 0):
+        start_inner = self.inner_pts[0]
+        start_outer = self.outer_pts[0]
+    elif(session_type == 'R' and len(self.screen_inner_points) > 0 and len(self.screen_outer_points) > 0):
+        start_inner = self.screen_inner_points[0]
+        start_outer = self.screen_outer_points[0]
+    else:
+        return
+    
+    # Draw checkered finish line
+    if start_inner and start_outer:
+        num_squares = 20
+        extension = 20
+            
+        # Calculate direction vector and normalize
+        dx = start_outer[0] - start_inner[0]
+        dy = start_outer[1] - start_inner[1]
+        length = np.sqrt(dx**2 + dy**2)
+            
+        if length > 0:
+            # Normalize direction (unit vector)
+            dx_norm = dx / length
+            dy_norm = dy / length
+                
+            # Extend line beyond track limits
+            extended_inner = (start_inner[0] - extension * dx_norm, 
+                             start_inner[1] - extension * dy_norm)
+            extended_outer = (start_outer[0] + extension * dx_norm, 
+                             start_outer[1] + extension * dy_norm)
+            
+            # Draw checkered pattern across extended line
+            for i in range(num_squares):
+                t1 = i / num_squares # start of segment
+                t2 = (i + 1) / num_squares # end of segment
+                
+                x1 = extended_inner[0] + t1 * (extended_outer[0] - extended_inner[0])
+                y1 = extended_inner[1] + t1 * (extended_outer[1] - extended_inner[1])
+                x2 = extended_inner[0] + t2 * (extended_outer[0] - extended_inner[0])
+                y2 = extended_inner[1] + t2 * (extended_outer[1] - extended_inner[1])
+                
+                color = arcade.color.WHITE if i % 2 == 0 else arcade.color.BLACK
+                arcade.draw_line(x1, y1, x2, y2, color, 6)
