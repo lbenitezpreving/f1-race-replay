@@ -90,16 +90,15 @@ class QualifyingReplay(arcade.Window):
         # Legend + controls popup (same behavior as race replay)
         self.legend_comp = LegendComponent(x=max(12, self.left_ui_margin - 320))
         self.controls_popup_comp = ControlsPopupComponent(lines=[
-            " ",
-            "[SPACE] Pause/Resume",
-            "← / →  Jump back/forward",
-            "↑ / ↓  Speed +/-",
-            "[1-4]  Set speed: 0.5x / 1x / 2x / 4x",
-            "[R]    Restart",
-            "[D]    Toggle DRS Zones",
-            "[C]    Toggle Comparison Telemetry",
-            "[H]    Toggle Help Popup",
-            "[ESC]  Close Window",
+            ("SPACE", "Pause/Resume"),
+            ("← / →", "Jump back/forward"),
+            ("↑ / ↓", "Speed +/-"),
+            ("1-4", "Set speed: 0.5x / 1x / 2x / 4x"),
+            ("R", "Restart"),
+            ("D", "Toggle DRS Zones"),
+            ("C", "Toggle Comparison Telemetry"),
+            ("H", "Toggle Help Popup"),
+            ("ESC", "Close Window"),
         ])
         self.controls_popup_comp.set_size(340, 250)
         self.controls_popup_comp.set_font_sizes(header_font_size=16, body_font_size=13)
