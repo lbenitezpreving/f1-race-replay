@@ -23,7 +23,7 @@ class WeatherRadarWidget(QWidget):
     Custom widget simulating a weather radar.
     Visualizes wind direction/speed and rain intensity.
     """
-    def __init__(self):
+    def __init__(self, debug_rain=False):
         super().__init__()
         self.wind_speed = 0.0
         self.wind_direction = 0.0
@@ -31,6 +31,7 @@ class WeatherRadarWidget(QWidget):
         self.humidity = 0.0
         self.air_temp = 0.0
         self.track_temp = 0.0
+        self.debug_rain = debug_rain
         
         # Animation for radar sweep
         self.sweep_angle = 0
@@ -51,37 +52,66 @@ class WeatherRadarWidget(QWidget):
         self.air_temp = weather_data.get('air_temp', 0.0)
         self.track_temp = weather_data.get('track_temp', 0.0)
         
+        if self.debug_rain and self.rain_state != 'RAINING':
+             # Override for debug if not already raining
+             self.rain_state = "RAINING (SIM)"
+             if self.wind_speed < 2.0: self.wind_speed = 5.0 # Ensure some wind for movement
+             if self.wind_direction == 0: self.wind_direction = 225 # SW wind default
+        
         # Update rain simulation
         self._update_rain_blobs()
         self.update()
 
     def _update_rain_blobs(self):
         # Determine rain intensity factor
-        intensity = 0
-        if self.rain_state == 'RAINING':
-            intensity = 1.0 # Simple ON/OFF for now, logic could be more complex
+        is_raining = self.rain_state.startswith('RAINING')
         
-        # Update existing blobs
-        # Move them slightly with wind
-        # Convert wind dir to rads
-        wind_rad = math.radians(self.wind_direction - 90) # Adjust for North=0
+        # In debug mode, we want continuous rain clouds coming from wind direction
+        # In normal mode, we spawn randomly if raining
         
-        # Spawn new blobs if raining
-        if intensity > 0 and len(self.rain_blobs) < 20:
-             self.rain_blobs.append({
-                'angle': random.uniform(0, 360),
-                'dist': random.uniform(0.1, 0.9), # normalized distance
-                'size': random.uniform(0.1, 0.3),
+        # Convert wind dir to rads (direction wind is coming FROM)
+        # Clouds move TO the opposite direction
+        wind_from_rad = math.radians(self.wind_direction - 90)
+        wind_to_rad = wind_from_rad + math.pi
+        
+        # Move existing blobs
+        speed_factor = 0.01 + (self.wind_speed / 100.0)
+        
+        alive_blobs = []
+        for blob in self.rain_blobs:
+            # Convert polar to cartesian to move
+            bx = blob['dist'] * math.cos(math.radians(blob['angle']))
+            by = blob['dist'] * math.sin(math.radians(blob['angle']))
+            
+            # Move blob
+            bx += math.cos(wind_to_rad) * speed_factor
+            by += math.sin(wind_to_rad) * speed_factor
+            
+            # Convert back to polar
+            blob['dist'] = math.sqrt(bx*bx + by*by)
+            blob['angle'] = math.degrees(math.atan2(by, bx))
+            
+            # Decay life
+            blob['life'] -= 0.005
+            
+            if blob['life'] > 0 and blob['dist'] < 1.5: # Keep if alive and not too far
+                alive_blobs.append(blob)
+                
+        self.rain_blobs = alive_blobs
+        
+        # Spawn new blobs
+        target_blobs = 40 if is_raining else 0
+        if len(self.rain_blobs) < target_blobs:
+            # Spawn at edge (dist=1.0) in the UPWIND direction (where wind comes from)
+            # Add some spread (+/- 45 degrees)
+            spawn_angle_rad = wind_from_rad + random.uniform(-0.8, 0.8)
+            
+            self.rain_blobs.append({
+                'angle': math.degrees(spawn_angle_rad),
+                'dist': 1.0, 
+                'size': random.uniform(0.15, 0.4),
                 'life': 1.0
              })
-             
-        # Decay blobs
-        for blob in self.rain_blobs:
-            blob['life'] -= 0.01
-            # Move visually with wind (simplified)
-            # Just drift them a bit
-        
-        self.rain_blobs = [b for b in self.rain_blobs if b['life'] > 0]
 
     def animate(self):
         self.sweep_angle = (self.sweep_angle + 5) % 360
@@ -124,7 +154,7 @@ class WeatherRadarWidget(QWidget):
             painter.setPen(Qt.NoPen)
             for blob in self.rain_blobs:
                 # Polar to cartesian
-                b_angle = math.radians(blob.angle)
+                b_angle = math.radians(blob['angle'])
                 b_dist = blob['dist'] * radius
                 bx = cx + b_dist * math.cos(b_angle)
                 by = cy + b_dist * math.sin(b_angle)
@@ -290,8 +320,9 @@ class TrendGraphWidget(QWidget):
 
 
 class WeatherViewer(QMainWindow):
-    def __init__(self):
+    def __init__(self, debug_rain=False):
         super().__init__()
+        self.debug_rain = debug_rain
         self.setWindowTitle("F1 Race Replay - Weather Viewer [Conectando...]")
         self.setGeometry(100, 100, 1280, 720)
         self.setStyleSheet("background-color: #010409;") # Main window bg
@@ -328,7 +359,7 @@ class WeatherViewer(QMainWindow):
         grid.addWidget(self.status_bar, 0, 0, 1, 2)
         
         # 2. Zone 1 (Top-Left): Weather Radar
-        self.radar_widget = WeatherRadarWidget()
+        self.radar_widget = WeatherRadarWidget(debug_rain=self.debug_rain)
         grid.addWidget(self.radar_widget, 1, 0)
         
         # 3. Zone 2 (Top-Right): Trend Graphs
@@ -400,9 +431,17 @@ class WeatherViewer(QMainWindow):
             self.client.wait()
         event.accept()
 
-if __name__ == "__main__":
+def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Weather Viewer")
-    viewer = WeatherViewer()
+    
+    debug_rain = "--debug-rain" in sys.argv
+    if debug_rain:
+        print("Debug Rain Simulation Enabled")
+        
+    viewer = WeatherViewer(debug_rain=debug_rain)
     viewer.show()
     sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
